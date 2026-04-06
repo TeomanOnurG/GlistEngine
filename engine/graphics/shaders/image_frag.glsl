@@ -11,6 +11,11 @@ uniform int maskMode;
 uniform float imageRotation;
 uniform float maskRotation;
 
+const int MASKMODE_BOTH = 0;
+const int MASKMODE_PICTURE = 1;
+const int MASKMODE_MASK = 2;
+const int MASKMODE_BOTH_FREE_ROTATE = 3;
+
 void main() {
     vec2 pivot = vec2(0.5, 0.5);
     vec2 uv = TexCoords - pivot;
@@ -36,19 +41,19 @@ void main() {
     vec4 tex;
     vec4 msk;
 
-    if(maskMode == 0) {
+    if(maskMode == MASKMODE_BOTH) {
         tex = texture(image, imageRotated);
         msk = texture(maskimage, TexCoords);
     }
-    else if(maskMode == 1) {
+    else if(maskMode == MASKMODE_PICTURE) {
         tex = texture(image, imageRotated);
         msk = texture(maskimage, imageRotated);
     }
-    else if(maskMode == 2) {
+    else if(maskMode == MASKMODE_MASK) {
         tex = texture(image, TexCoords);
         msk = texture(maskimage, maskRotated);
     }
-    else if(maskMode == 3) {
+    else if(maskMode == MASKMODE_BOTH_FREE_ROTATE) {
         tex = texture(image, imageRotated);
         msk = texture(maskimage, maskRotated);
     }
