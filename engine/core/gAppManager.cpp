@@ -13,6 +13,7 @@
 #include "gBaseApp.h"
 #include "gCanvasManager.h"
 #include "gGUIFrame.h"
+#include "gVKRenderEngine.h"
 
 #include <algorithm>
 #include <thread>
@@ -26,6 +27,7 @@
 #include "gAndroidWindow.h"
 #include "gAndroidCanvas.h"
 #include "gAndroidApp.h"
+#include "gAndroidUtil.h"
 #elif TARGET_OS_IPHONE || TARGET_OS_SIMULATOR
 #   include "gIOSWindow.h"
 #   include "gIOSCanvas.h"
@@ -45,7 +47,7 @@ void gStartEngine(gBaseApp* baseApp, const std::string& appName, int windowMode,
 void gStartEngine(gBaseApp* baseApp, const std::string& appName, int windowMode, int unitWidth, int unitHeight, int screenScaling, int width, int height, bool isResizable, int renderEngine) {
     if(windowMode == G_WINDOWMODE_NONE) windowMode = G_WINDOWMODE_APP;
 #if TARGET_OS_IPHONE || TARGET_OS_SIMULATOR
-    ios_main(baseApp, appName.c_str(), windowMode, unitWidth, unitHeight, screenScaling, width, height, isResizable);
+    ios_main(baseApp, appName.c_str(), windowMode, unitWidth, unitHeight, screenScaling, width, height, isResizable, renderEngine);
 #elif defined(ANDROID)
     gAppManager* manager = new gAppManager(appName, baseApp, width, height, windowMode, unitWidth, unitHeight, screenScaling, isResizable, G_LOOPMODE_NORMAL);
     manager->setRenderEngine(renderEngine);
@@ -216,6 +218,9 @@ void gAppManager::initialize() {
 		}
 		// Create renderer
 		gRenderObject::createRenderer(renderengine);
+		// setMultiSampling() may be called before initialize(), while no renderer
+		// exists yet. Apply the remembered request as soon as the backend is ready.
+		renderer->setMultiSampling(requestedmultisampling);
 		// The engine's GUI resources are OpenGL based. Under the Vulkan backend the
 		// window carries no GL context, so they stay uninitialised until the Vulkan
 		// rendering path exists.
@@ -451,10 +456,28 @@ int gAppManager::getFramerate() {
 
 void gAppManager::enableVsync() {
     window->setVsync(true);
+	if(renderengine == G_RENDERER_VK && renderer != nullptr) {
+		static_cast<gVKRenderEngine*>(renderer)->setVsync(true);
+	}
 }
 
 void gAppManager::disableVsync() {
     window->setVsync(false);
+	if(renderengine == G_RENDERER_VK && renderer != nullptr) {
+		static_cast<gVKRenderEngine*>(renderer)->setVsync(false);
+	}
+}
+
+void gAppManager::setMultiSampling(int samples) {
+	requestedmultisampling = samples < 1 ? 1 : samples;
+	if(renderer != nullptr) renderer->setMultiSampling(requestedmultisampling);
+}
+
+int gAppManager::getMultiSampling() const {
+	// Before initialization there is no achieved device value yet; report the
+	// request that will be applied when the renderer is created.
+	if(renderer == nullptr) return requestedmultisampling;
+	return renderer->getMultiSampling();
 }
 
 void gAppManager::setCurrentGUIFrame(gGUIFrame *guiFrame) {
@@ -559,8 +582,16 @@ void gAppManager::tick() {
     // to, and any geometry recorded afterwards lands inside that same pass.
     if(renderengine == G_RENDERER_VK) {
         if(canvasmanager) canvasmanager->update();
-        gBaseCanvas* vkcanvas = (canvasmanager && !isguiapp) ? canvasmanager->getCurrentCanvas() : nullptr;
+        if(guimanager) guimanager->update();
         if(!isguiapp) app->update();
+        for(gBaseComponent*& component : gBaseComponent::usedcomponents) {
+            component->update();
+        }
+        for(gBasePlugin*& component : gBasePlugin::usedplugins) {
+            component->update();
+        }
+
+        gBaseCanvas* vkcanvas = (canvasmanager && !isguiapp) ? canvasmanager->getCurrentCanvas() : nullptr;
         if(vkcanvas) vkcanvas->update();
         if(renderer != nullptr && renderer->beginFrame()) {
             // The scene is drawn once per render pass, the same way the OpenGL loop
@@ -574,9 +605,11 @@ void gAppManager::tick() {
                 const bool shadowpass = renderpassnum > 1 && i == 0;
                 if(shadowpass && !renderer->beginShadowPass()) continue;
                 if(vkcanvas) vkcanvas->draw();
+				renderer->flushQueuedDraws();
                 if(shadowpass) renderer->endShadowPass();
             }
             renderpassno = 0;
+            if(guimanager) guimanager->draw();
             renderer->endFrame();
             totaldraws++;
         }
@@ -916,7 +949,11 @@ bool gAppManager::onTouchEvent(gTouchEvent& event) {
 	// only converts the platform event into the existing GUI mouse contract; it
 	// deliberately carries no page-scroll state or gesture policy.
 	if(isguiapp && guimanager && guimanager->isframeset && event.getInputCount() > 0) {
-		const int inputindex = event.getActionIndex();
+		int inputindex = event.getActionIndex();
+		const ActionType action = event.getAction();
+		if (action == ACTIONTYPE_MOVE) {
+			inputindex = 0;
+		}
 		if(inputindex >= 0 && inputindex < event.getInputCount()) {
 			TouchInput& input = event.getInputs()[inputindex];
 			int x = input.x;
@@ -925,9 +962,7 @@ bool gAppManager::onTouchEvent(gTouchEvent& event) {
 				x = gRenderer::scaleX(x);
 				y = gRenderer::scaleY(y);
 			}
-			const ActionType action = event.getAction();
-			submitToMainThread([this, x, y, action]() {
-				if(!guimanager || !guimanager->isframeset) return;
+			if(guimanager && guimanager->isframeset) {
 				if(action == ACTIONTYPE_POINTER_DOWN || action == ACTIONTYPE_DOWN) {
 					guimanager->mouseMoved(x, y);
 					guimanager->mousePressed(x, y, 0);
@@ -937,7 +972,7 @@ bool gAppManager::onTouchEvent(gTouchEvent& event) {
 						|| action == ACTIONTYPE_CANCEL || action == ACTIONTYPE_OUTSIDE) {
 					guimanager->mouseReleased(x, y, 0);
 				}
-			});
+			}
 			return false;
 		}
 	}
@@ -1008,15 +1043,22 @@ void gAppManager::submitToMainThread(std::function<void()> fn) {
 
 void gAppManager::executeQueue() {
 	G_PROFILE_ZONE_SCOPED_N("gAppManager::executeQueue()");
-    std::unique_lock<std::mutex> lock(mainthreadqueuemutex);
-    for (auto& func : mainthreadqueue) {
-        func();
-    }
-    mainthreadqueue.clear();
+	std::vector<std::function<void()>> localqueue;
+	{
+		std::unique_lock<std::mutex> lock(mainthreadqueuemutex);
+		localqueue = std::move(mainthreadqueue);
+		mainthreadqueue.clear();
+	}
+	for (auto& func : localqueue) {
+		func();
+	}
 }
 
 void gAppManager::preciseSleep(double seconds) {
 	G_PROFILE_ZONE_SCOPED_N("gAppManager::preciseSleep()");
+#if defined(ANDROID) || defined(IOS)
+	// No-op on mobile. eglSwapBuffers handles vsync throttling natively.
+#else
     double estimate = 5e-3;
     double mean = 5e-3;
     double m2 = 0;
@@ -1044,4 +1086,17 @@ void gAppManager::preciseSleep(double seconds) {
     // spin lock
     AppClockTimePoint start = AppClock::now();
     while ((AppClock::now() - start).count() / 1'000'000'000.0 < seconds);
+#endif
+}
+
+void gAppManager::showKeyboard() {
+#ifdef ANDROID
+	gAndroidUtil::showKeyboard();
+#endif
+}
+
+void gAppManager::hideKeyboard() {
+#ifdef ANDROID
+	gAndroidUtil::hideKeyboard();
+#endif
 }

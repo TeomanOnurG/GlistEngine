@@ -117,6 +117,11 @@ void gDrawBox(float x, float y, float z, float w, float h, float d, bool isFille
 	gRenderObject::getRenderer()->drawBox(x, y, z, w, h, d, isFilled);
 }
 
+void gDrawBox(float x, float y, float z,float w, float h, float d, float rotateAngle, float axisX, float axisY, float axisZ, bool isFilled) {
+    G_PROFILE_ZONE_SCOPED_N("gDrawBox()");
+    gRenderObject::getRenderer()->drawBox(x, y, z, w, h, d, rotateAngle, axisX, axisY, axisZ, isFilled);
+}
+
 void gDrawBox(glm::mat4 transformationMatrix, bool isFilled) {
 	G_PROFILE_ZONE_SCOPED_N("gDrawBox()");
 	gRenderObject::getRenderer()->drawBox(transformationMatrix, isFilled);
@@ -464,12 +469,52 @@ void gRenderer::drawRoundedRectangle(float x, float y, float w, float h, int rad
 
 void gRenderer::drawBox(float x, float y, float z, float w, float h, float d, bool isFilled) {
     G_PROFILE_ZONE_SCOPED_N("gRenderer::drawBox()");
-    if (boxmesh) boxmesh->draw();
+    if (boxmesh) {
+        boxmesh->setPosition(x, y, z);
+        boxmesh->setScale(w, h, d);
+        boxmesh->setOrientation(
+        glm::quat(1.0f, 0.0f, 0.0f, 0.0f)
+        );
+
+        boxmesh->draw();
+    }
+}
+
+void gRenderer::drawBox(float x, float y, float z, float w, float h, float d, float rotateAngle, float axisX, float axisY, float axisZ, bool isFilled) {
+    G_PROFILE_ZONE_SCOPED_N("gRenderer::drawBox()");
+    if (boxmesh) {
+        boxmesh->setPosition(x, y, z);
+        boxmesh->setScale(w, h, d);
+        glm::vec3 axis(axisX, axisY, axisZ);
+
+        if (glm::length(axis) > 0.0f) {
+
+            axis = glm::normalize(axis);
+
+            glm::quat rotation =
+                glm::angleAxis(rotateAngle, axis);
+
+            rotation = glm::normalize(rotation);
+
+            boxmesh->setOrientation(rotation);
+
+        } else {
+
+            boxmesh->setOrientation(
+                glm::quat(1.0f, 0.0f, 0.0f, 0.0f)
+            );
+        }
+
+        boxmesh->draw();
+    }
 }
 
 void gRenderer::drawBox(glm::mat4 transformationMatrix, bool isFilled) {
     G_PROFILE_ZONE_SCOPED_N("gRenderer::drawBox()");
-    if (boxmesh) boxmesh->draw();
+    if (boxmesh) {
+        boxmesh->setTransformationMatrix(transformationMatrix);
+        boxmesh->draw();
+    }
 }
 
 void gRenderer::drawSphere(float xPos, float yPos, float zPos, glm::vec3 scale, int xSegmentNum, int ySegmentNum, bool isFilled) {
@@ -808,7 +853,7 @@ void gRenderer::updateLights() {
 		bool isenabled = islightingenabled && item->isEnabled();
 		if (previous != isenabled) {
 			isenabledchanged = true;
-			if (item->isEnabled()) {
+			if (isenabled) {
 				data->enabledlights |= bit;
 			} else {
 				data->enabledlights &= ~bit;
@@ -1102,6 +1147,38 @@ void gRenderer::disableSoftShadows() {
 
 bool gRenderer::isSoftShadowsEnabled() {
 	return issoftshadowsenabled;
+}
+
+// These six were declared in the header and never defined, so anything calling one
+// failed to link. Both backends' shaders have always carried the flag - ENABLE_GAMMA
+// and ENABLE_HDR in color_frag.glsl, the same bits in the Vulkan scene block - and
+// updateScene() has always published them; the only missing piece was a way to ask.
+void gRenderer::enableGammaCorrection() {
+	isgammacorrectionenabled = true;
+	updateScene();
+}
+
+void gRenderer::disableGammaCorrection() {
+	isgammacorrectionenabled = false;
+	updateScene();
+}
+
+bool gRenderer::isGammaCorrectionEnabled() {
+	return isgammacorrectionenabled;
+}
+
+void gRenderer::enableHDR() {
+	ishdrenabled = true;
+	updateScene();
+}
+
+void gRenderer::disableHDR() {
+	ishdrenabled = false;
+	updateScene();
+}
+
+bool gRenderer::isHDREnabled() {
+	return ishdrenabled;
 }
 
 void gRenderer::cleanupSSAOResources() {

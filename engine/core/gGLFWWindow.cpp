@@ -5,17 +5,18 @@
  *      Author: noyan
  */
 
-// gVKContext.h decides whether Vulkan is available at all (GVK_DESKTOP_GLFW) and
+// gVKContext.h decides whether Vulkan is available at all (GVK_VULKAN) and
 // pulls in <vulkan/vulkan.h>. Both have to happen before GLFW is included below:
 // glfwInitVulkanLoader is declared inside GLFW's #if defined(VK_VERSION_1_0)
 // block, so without the Vulkan header first it would not exist.
 #include "gVKContext.h"
-#ifdef GVK_DESKTOP_GLFW
+#ifdef GVK_VULKAN
 	#define GLFW_INCLUDE_VULKAN
 #endif
 
 #include "gGLFWWindow.h"
 #include "gAppManager.h"
+#include "gRenderObject.h"
 #include "gTracy.h"
 #ifdef WIN32
 #include <ShellScalingApi.h>
@@ -207,7 +208,7 @@ void gGLFWWindow::initialize(int width, int height, int windowMode, bool isResiz
 	}
 #endif
 
-#ifdef GVK_DESKTOP_GLFW
+#ifdef GVK_VULKAN
 	// Hand GLFW the loader this engine is already linked against, rather than let it
 	// search for one. Left to itself GLFW dlopens the loader by bare name, which
 	// fails wherever it lives outside the default library search path - Homebrew's
@@ -419,13 +420,52 @@ void gGLFWWindow::close() {
 	glfwTerminate();
 }
 
+bool gGLFWWindow::supportsVulkan() const {
+#ifdef GVK_VULKAN
+	return window != nullptr && glfwVulkanSupported() == GLFW_TRUE;
+#else
+	return false;
+#endif
+}
+
+void gGLFWWindow::getVulkanInstanceExtensions(std::vector<const char*>& extensions) const {
+#ifdef GVK_VULKAN
+	uint32_t count = 0;
+	const char** names = glfwGetRequiredInstanceExtensions(&count);
+	if(names != nullptr) extensions.insert(extensions.end(), names, names + count);
+#else
+	(void)extensions;
+#endif
+}
+
+bool gGLFWWindow::createVulkanSurface(void* instance, void* surface) {
+#ifdef GVK_VULKAN
+	if(window == nullptr || instance == nullptr || surface == nullptr) return false;
+	return glfwCreateWindowSurface(*static_cast<VkInstance*>(instance), window, nullptr,
+			static_cast<VkSurfaceKHR*>(surface)) == VK_SUCCESS;
+#else
+	(void)instance;
+	(void)surface;
+	return false;
+#endif
+}
+
 void gGLFWWindow::setVsync(bool vsync) {
 	gBaseWindow::setVsync(vsync);
 	// glfwSwapInterval controls the current OpenGL context. Vulkan windows are
 	// created with GLFW_NO_API and synchronise presentation through the swapchain
 	// present mode instead, so calling it there raises GLFW_NO_CURRENT_CONTEXT.
-	if(window != nullptr && glfwGetWindowAttrib(window, GLFW_CLIENT_API) != GLFW_NO_API)
+	//
+	// That other path has to actually be taken, though. Leaving it out is what kept
+	// the Vulkan backend on FIFO whatever the game asked for - vsynced, and so
+	// capped at the display's refresh rate while the OpenGL build of the same game
+	// ran unlocked. It made the two look far apart on a frame counter when the
+	// difference was that one of them was waiting for the monitor.
+	if(window != nullptr && glfwGetWindowAttrib(window, GLFW_CLIENT_API) != GLFW_NO_API) {
 		glfwSwapInterval(vsync ? 1 : 0);
+	} else if(gRenderObject::getRenderer() != nullptr) {
+		gRenderObject::getRenderer()->setVsync(vsync);
+	}
 }
 
 void gGLFWWindow::setCursor(int cursorNo) {

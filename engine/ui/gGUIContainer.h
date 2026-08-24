@@ -15,7 +15,7 @@
 class gGUIContainer: public gGUIScrollable {
 public:
 	gGUIContainer();
-	virtual ~gGUIContainer();
+	virtual ~gGUIContainer() override;
 
 	void set(gBaseApp* root, gBaseGUIObject* topParentGUIObject, gBaseGUIObject* parentGUIObject, int parentSlotLineNo, int parentSlotColumnNo, int x, int y, int w, int h) override;
 	void set(int x, int y, int w, int h);
@@ -48,6 +48,7 @@ public:
 	void drawContent() override;
 
 	void setCursorOn(bool isOn) override;
+	void unfocus() override;
 
 
 protected:

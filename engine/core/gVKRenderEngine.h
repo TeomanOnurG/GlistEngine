@@ -9,6 +9,7 @@
 #include "gRenderer.h"
 #include "gUbo.h"
 #include <unordered_map>
+#include <vector>
 
 // All Vulkan objects live behind these opaque types, so <vulkan/vulkan.h> is not
 // pushed into every translation unit that includes this header and the class
@@ -41,6 +42,7 @@ public:
 
 	bool beginFrame() override;
 	void endFrame() override;
+	void flushQueuedDraws() override;
 
 	void clear() override;
 	void clearColor(int r, int g, int b, int a = 255) override;
@@ -60,8 +62,13 @@ public:
 	void disableDepthTest() override;
 	bool isDepthTestEnabled() override;
 	int getDepthTestType() override;
+	void enableCulling() override;
+	void disableCulling() override;
+	void setCullFace(int face) override;
+	void setCullingDirection(int direction) override;
 
 	void enableAlphaBlending() override;
+	void setBlendMode(int blendMode) override;
 	void disableAlphaBlending() override;
 	bool isAlphaBlendingEnabled() override;
 	void enableAlphaTest() override;
@@ -173,6 +180,7 @@ public:
 
 	/* -------------- gGrid --------------- */
 	void drawVbo(const gVbo& vbo) override;
+	void drawVbo(const gVbo& vbo, const glm::mat4& model, const gMeshSurface& surface) override;
 
 	/* ---------------- gTexture ---------------- */
 	GLuint createTextures() override;
@@ -233,8 +241,23 @@ public:
 	void releaseShadowMap() override;
 	bool beginShadowPass() override;
 	void endShadowPass() override;
+	bool isShadowPassActive() const override;
 	void setShadowMapState(bool enabled, const glm::mat4& lightMatrix,
 			const glm::vec3& lightPosition, bool softShadows) override;
+
+	// Drops the gathered scene block so the next 3D draw rebuilds it; see the base
+	// declaration for why the two backends cannot share one moment for this.
+	void updateLights() override;
+
+	// Rebuilds the swapchain with the present mode the new setting asks for.
+	void setVsync(bool enabled) override;
+
+	// Rebuilds the screen render pass, its attachments and every pipeline at the new
+	// sample count. Like setVsync, the work is deferred to the next frame boundary,
+	// because this can be called from anywhere - including mid-frame with a command
+	// buffer already recording.
+	void setMultiSampling(int samples) override;
+	int getMultiSampling() const override;
 
 	void drawTexturedRect2D(GLuint textureId, GLuint maskTextureId, const glm::vec4& tint,
 			const glm::mat4& mvp,
@@ -343,10 +366,49 @@ private:
 	// Whether this frame's scene block has been written yet. Reset in beginFrame, so
 	// the camera and lights are gathered once per frame instead of once per mesh.
 	bool sceneuniformswritten = false;
+
+	// Consecutive opaque mesh calls are safe to combine because their relative
+	// order is preserved.  Transparent meshes and caller-provided instancing stay
+	// immediate: changing either would alter the public draw semantics.
+	struct QueuedMeshDraw {
+		GLuint vertexarrayid = 0;
+		int vertexcount = 0;
+		int indexcount = 0;
+		int drawmode = GL_TRIANGLES;
+		int instancecount = 1;
+		glm::mat4 model{1.0f};
+		gMeshSurface surface{};
+		glm::vec4 tint{1.0f};
+		bool depthtest = false;
+		int depthtesttype = DEPTHTESTTYPE_LESS;
+		bool culling = false;
+		int cullface = GL_BACK;
+		int cullingdirection = GL_CCW;
+		// A digest of everything canMergeQueuedDraws compares, filled when the draw
+		// is queued. flushQueuedDraws sorts by it so that draws which could merge but
+		// arrived apart end up next to each other; the exact comparison still decides
+		// whether they really do, so a hash collision costs a missed merge and
+		// nothing else.
+		uint64_t mergekey = 0;
+	};
+	std::vector<QueuedMeshDraw> queuedmeshdraws;
+	bool flushingqueueddraws = false;
+	static uint64_t gvkQueuedDrawKey(const QueuedMeshDraw& draw);
+	bool canMergeQueuedDraws(const QueuedMeshDraw& first, const QueuedMeshDraw& next) const;
+	void recordQueuedDrawGroup(size_t first, size_t count);
 	void destroyAllTextures();
 	// The Vulkan texture behind the currently bound id, or null when there is none
 	// yet - gTexture sets filtering and wrapping both before and after the upload.
 	gVKTexture* getBoundVKTexture();
+
+	// Applies a pending setMultiSampling at a frame boundary: everything the sample
+	// count is baked into - the render pass, the depth and MSAA attachments, the
+	// framebuffers and both pipeline builds - is destroyed and rebuilt. Returns
+	// straight away when nothing was requested, which is the normal case.
+	void applyPendingSampleCount();
+	// The sample count an app asked for before the context existed, and the pending
+	// request applyPendingSampleCount acts on. 0 means "nothing pending".
+	int pendingsamplecount = 0;
 
 	// Shader hot reload. Development builds watch the .vert / .frag sources the 2D
 	// pipelines are compiled from and rebuild them when one is saved, so a shader

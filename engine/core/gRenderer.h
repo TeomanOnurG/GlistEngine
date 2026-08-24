@@ -79,7 +79,7 @@ int gGetCullFace();
 void gSetCullingDirection(int cullingDirection);
 int gGetCullingDirection();
 
-// --- 2D / 3D Line Overloads (Ambiguous hatasýný önlemek için ayrýþtýrýldý) ---
+// --- 2D / 3D Line Overloads
 void gDrawLine(float x1, float y1, float x2, float y2);
 void gDrawLine(float x1, float y1, float x2, float y2, float thickness);
 void gDrawLine(float x1, float y1, float z1, float x2, float y2, float z2, float thickness = 1.0f);
@@ -93,6 +93,7 @@ void gDrawArrow(float x1, float y1, float length, float angle, float tipLength, 
 void gDrawRectangle(float x, float y, float w, float h, bool isFilled = false, float rotateAngle = 0.0f, float pivotx = 0.5f, float pivoty = 0.5f);
 void gDrawRoundedRectangle(float x, float y, float w, float h, int radius, bool isFilled, float rotateAngle = 0.0f, float pivotx = 0.5f, float pivoty = 0.5f);
 void gDrawBox(float x, float y, float z, float w = 1.0f, float h = 1.0f, float d = 1.0f, bool isFilled = true);
+void gDrawBox(float x, float y, float z, float w, float h, float d, float rotateAngle, float axisX, float axisY, float axisZ, bool isFilled = true);
 void gDrawBox(glm::mat4 transformationMatrix, bool isFilled = true);
 void gDrawSphere(float xPos, float yPos, float zPos, glm::vec3 scale = glm::vec3(1.0f, 1.0f, 1.0f), int xSegmentNum = 64, int ySegmentNum = 32, bool isFilled = true);
 void gDrawCylinder(float x, float y, float z, int r, int h, glm::vec3 scale = glm::vec3(1.0f, 1.0f, 1.0f), int segmentnum = 32, bool isFilled = true);
@@ -253,6 +254,7 @@ public:
 
 	virtual bool beginFrame() { return true; }
 	virtual void endFrame() {}
+	virtual void flushQueuedDraws() {}
 
 	int getRenderEngineType() const { return renderenginetype; }
 	bool isVulkan() const { return renderenginetype == G_RENDERER_VK; }
@@ -343,6 +345,7 @@ public:
 	// equivalent inside gShadowMap::enable() and leaves these alone.
 	virtual bool beginShadowPass() { return false; }
 	virtual void endShadowPass() {}
+	virtual bool isShadowPassActive() const { return false; }
 
 	// lightMatrix is lightProjection * lightView; lightPosition is where the caster
 	// sits, used for the depth bias. enabled false means shade without shadows.
@@ -391,7 +394,33 @@ public:
 	gLight* getSceneLight(int lightNo);
 	int getSceneLightNum();
 	void removeAllSceneLights();
-	void updateLights();
+	// Virtual because the two backends publish light state at different moments.
+	// OpenGL writes its uniform block right here, the instant a light is enabled or
+	// its colour changes. The Vulkan backend gathers the whole scene block once per
+	// render pass instead, so it overrides this to mark that block stale - a canvas
+	// that enables its light just before drawing and disables it after, which is
+	// what gLight's API invites, would otherwise be shaded with the state left over
+	// from the previous frame, when the light was off.
+	virtual void updateLights();
+
+	// Presentation pacing. OpenGL sets it on the window through glfwSwapInterval
+	// and needs nothing here; Vulkan expresses it as the swapchain's present mode,
+	// so the backend overrides this to rebuild the swapchain with the new one.
+	virtual void setVsync(bool enabled) {}
+
+	// Multisample anti-aliasing, in samples per pixel: 1 (the default) is off, and 2,
+	// 4 or 8 ask for that many coverage samples on the screen pass. Shaped like
+	// setVsync for the same reason - OpenGL takes it from the window's framebuffer
+	// while Vulkan bakes it into the render pass and every pipeline, so only the
+	// Vulkan backend overrides these.
+	//
+	// The request is capped at what the device supports for colour *and* depth
+	// attachments, so getMultiSampling() is the value that was actually achieved and
+	// may be lower than what was asked for - 1 on a device that offers no
+	// multisampled combination at all. Off by default: an existing application sees
+	// no change in cost or appearance until it asks.
+	virtual void setMultiSampling(int samples) {}
+	virtual int getMultiSampling() const { return 1; }
 
 	void updateScene();
 
@@ -414,6 +443,23 @@ public:
 	virtual void enableAlphaBlending() = 0;
 	virtual void disableAlphaBlending() = 0;
 	virtual bool isAlphaBlendingEnabled() = 0;
+
+	// How a blended draw combines with what is already in the framebuffer. Only
+	// meaningful while alpha blending is on; enabling it resets the mode to ALPHA,
+	// which is what it has always done.
+	//
+	// This exists because there was no way to ask for anything but the standard
+	// over operator. A game wanting an additive effect - a muzzle flash, a glow, a
+	// spark - had to reach past the renderer and call glBlendFunc itself, and that
+	// call means nothing to a backend that is not OpenGL: on Vulkan blending is
+	// baked into the pipeline, so the effect silently came out composited instead
+	// of added.
+	enum BlendMode {
+		BLENDMODE_ALPHA,     // src * a + dst * (1 - a). Layers one image over another.
+		BLENDMODE_ADDITIVE,  // src * a + dst. Only brightens, so black adds nothing.
+	};
+	virtual void setBlendMode(int blendMode) { blendmode = blendMode; }
+	virtual int getBlendMode() const { return blendmode; }
 	virtual void enableAlphaTest() = 0;
 	virtual void disableAlphaTest() = 0;
 	virtual bool isAlphaTestEnabled() = 0;
@@ -566,6 +612,7 @@ public:
 
 	/* -------------- gGrid --------------- */
 	virtual void drawVbo(const gVbo& vbo) = 0;
+	virtual void drawVbo(const gVbo& vbo, const glm::mat4& model, const gMeshSurface& surface) = 0;
 
 	/* ---------------- gTexture ---------------- */
 	virtual GLuint createTextures() = 0;
@@ -605,7 +652,7 @@ public:
 	virtual void pushMatrix() = 0;
 	virtual void popMatrix() = 0;
 
-	/* ---------------- Utilities (drawLine overloads düzenlendi) ---------------- */
+	/* ---------------- Utilities ---------------- */
 	void drawLine(float x1, float y1, float x2, float y2);
 	void drawLine(float x1, float y1, float x2, float y2, float thickness);
 	void drawLine(float x1, float y1, float z1, float x2, float y2, float z2, float thickness = 1.0f);
@@ -619,6 +666,7 @@ public:
 	void drawRectangle(float x, float y, float w, float h, bool isFilled = false, float rotateAngle = 0.0f, float pivotx = 0.5f, float pivoty = 0.5f);
 	void drawRoundedRectangle(float x, float y, float w, float h, int radius, bool isFilled, float rotateAngle = 0.0f, float pivotx = 0.5f, float pivoty = 0.5f);
 	void drawBox(float x, float y, float z, float w = 1.0f, float h = 1.0f, float d = 1.0f, bool isFilled = true);
+	void drawBox(float x, float y, float z, float w, float h, float d, float rotateAngle, float axisX, float axisY, float axisZ, bool isFilled = true);
 	void drawBox(glm::mat4 transformationMatrix, bool isFilled = true);
 	void drawSphere(float xPos, float yPos, float zPos, glm::vec3 scale = glm::vec3(1.0f, 1.0f, 1.0f), int xSegmentNum = 64, int ySegmentNum = 32, bool isFilled = true);
 	void drawCylinder(float x, float y, float z, int r, int h, glm::vec3 scale = glm::vec3(1.0f, 1.0f, 1.0f), int segmentnum = 32, bool isFilled = true);
@@ -647,34 +695,35 @@ protected:
 
 	int renderenginetype = G_RENDERER_GL;
 
-	bool isfogenabled;
-	int fogno;
+	bool isfogenabled = false;
+	int fogno = -1;
 	gColor fogcolor;
-	float fogdensity;
-	float foggradient;
-	int fogmode;
-	float foglinearstart;
-	float foglinearend;
+	float fogdensity = 0.3f;
+	float foggradient = 2.0f;
+	int fogmode = FOGMODE_EXP;
+	float foglinearstart = 0.0f;
+	float foglinearend = 1.0f;
 
 	std::deque<gLight*> scenelights;
 	gUbo<gSceneLights>* lightsubo = nullptr;
 	gUbo<gSceneData>* sceneubo = nullptr;
-	bool islightingenabled;
+	bool islightingenabled = true;
 	glm::vec3 lightingposition;
 	gColor lightingcolor;
 	gColor globalambientcolor;
-	bool isglobalambientcolorchanged;
+	bool isglobalambientcolorchanged = true;
 
-	bool isdepthtestenabled;
-	int depthtesttype;
+	bool isdepthtestenabled = false;
+	int depthtesttype = 0;
 	bool iscullingenabled = false;
 	int cullface = GL_BACK;
 	int cullingdirection = GL_CCW;
 	unsigned int depthtesttypeid[2];
-	bool isalphablendingenabled, isalphatestenabled;
+	bool isalphablendingenabled = false, isalphatestenabled = false;
+	int blendmode = BLENDMODE_ALPHA;
 
-	GLuint boundframebuffer;
-	int viewportx, viewporty, viewportwidth, viewportheight;
+	GLuint boundframebuffer = 0;
+	int viewportx = 0, viewporty = 0, viewportwidth = 0, viewportheight = 0;
 
 	bool isssaoenabled;
 	float ssaobias;
@@ -693,9 +742,9 @@ protected:
 	void initSSAOResources();
 	void cleanupSSAOResources();
 	void setupSSAODepthSampling();
-	bool isgammacorrectionenabled;
-	bool ishdrenabled;
-	bool issoftshadowsenabled;
+	bool isgammacorrectionenabled = false;
+	bool ishdrenabled = false;
+	bool issoftshadowsenabled = false;
 
 	gShader* colorshader;
 	gShader* textureshader;

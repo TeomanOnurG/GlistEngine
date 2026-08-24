@@ -9,36 +9,45 @@
 #include "gBezier.h"
 #include "gRenderer.h"
 
-gBezier::gBezier() : p0(glm::vec3(0.0f)), p1(glm::vec3(0.0f)), p2(glm::vec3(0.0f)), p3(glm::vec3(0.0f)), resolution(50), is3D(false) {
-
-}
-
-gBezier::gBezier(glm::vec2 p0, glm::vec2 p1, glm::vec2 p2, glm::vec2 p3) : p0(glm::vec3(p0, 0.0f)), p1(glm::vec3(p1, 0.0f)), p2(glm::vec3(p2, 0.0f)), p3(glm::vec3(p3, 0.0f)), resolution(50), is3D(false) {
-
-}
-
-gBezier::gBezier(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3) : p0(p0), p1(p1), p2(p2), p3(p3), resolution(50), is3D(true) {
-
+gBezier::gBezier() : resolution(50), is3D(false) {
 }
 
 gBezier::~gBezier() {
-
+	points.clear();
 }
 
-void gBezier::setPoint(glm::vec2 p0, glm::vec2 p1, glm::vec2 p2, glm::vec2 p3) {
-	this->p0 = glm::vec3(p0, 0.0f);
-	this->p1 = glm::vec3(p1, 0.0f);
-	this->p2 = glm::vec3(p2, 0.0f);
-	this->p3 = glm::vec3(p3, 0.0f);
+void gBezier::setPoint(const std::vector<glm::vec2>& pts) {
+	points.clear();
+	for (const auto& p : pts) {
+		if(points.size() >= 3) break;
+		points.push_back(glm::vec3(p.x, p.y, 0.0f));
+	}
 	is3D = false;
 }
 
-void gBezier::setPoint(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3) {
-	this->p0 = p0;
-	this->p1 = p1;
-	this->p2 = p2;
-	this->p3 = p3;
+void gBezier::setPoint(const std::vector<glm::vec3>& pts) {
+	points.clear();
+	for (const auto& p : pts) {
+		if(points.size() >= 3) break;
+		points.push_back(p);
+	}
 	is3D = true;
+}
+
+void gBezier::addPoint(glm::vec2 p) {
+	if(points.size() >= 3) return;
+	points.push_back(glm::vec3(p.x, p.y, 0.0f));
+}
+
+void gBezier::addPoint(glm::vec3 p) {
+	if(points.size() >= 3) return;
+	points.push_back(p);
+	is3D = true;
+}
+
+void gBezier::clearPoints() {
+	points.clear();
+	is3D = false;
 }
 
 void gBezier::setResolution(int res) {
@@ -46,46 +55,84 @@ void gBezier::setResolution(int res) {
 	resolution = res;
 }
 
-glm::vec2 gBezier::getPoint2D(float t) const {
-	glm::vec3 pt = getPoint3D(t);
-	return glm::vec2(pt.x, pt.y);
+void gBezier::setPointAtIndex(int index, glm::vec3 p) {
+	if(index >= 0 && index < points.size()) {
+		points[index] = p;
+		is3D = true;
+	}
 }
 
-glm::vec3 gBezier::getPoint3D(float t) const {
+void gBezier::setPointAtIndex(int index, glm::vec2 p) {
+	if(index >= 0 && index < points.size()) {
+		points[index] = glm::vec3(p.x, p.y, 0.0f);
+	}
+}
+
+glm::vec2 gBezier::getPoint2DAtIndex(int index) const {
+	if(index >= 0 && index < points.size()) {
+		return glm::vec2(points[index].x, points[index].y);
+	}
+	return glm::vec2(0.0f);
+}
+
+glm::vec3 gBezier::getPointAtIndex(int index) const {
+	if(index >= 0 && index < points.size()) {
+		return points[index];
+	}
+	return glm::vec3(0.0f);
+}
+
+glm::vec3 gBezier::getPoint(float t) const {
+	if(points.size() != 3) return glm::vec3(0.0f);
+
 	if(t < 0.0f) t = 0.0f;
 	if(t > 1.0f) t = 1.0f;
 
 	float u = 1.0f - t;
-	float tt = t * t;
-	float uu = u * u;
-	float uuu = uu * u;
-	float ttt = tt * t;
+	return (u * u * points[0]) + (2.0f * u * t * points[1]) + (t * t * points[2]);
+}
 
-	glm::vec3 result;
-	result.x = (uuu * p0.x) + (3.0f * uu * t * p1.x) + (3.0f * u * tt * p2.x) + (ttt * p3.x);
-	result.y = (uuu * p0.y) + (3.0f * uu * t * p1.y) + (3.0f * u * tt * p2.y) + (ttt * p3.y);
-	result.z = (uuu * p0.z) + (3.0f * uu * t * p1.z) + (3.0f * u * tt * p2.z) + (ttt * p3.z);
+glm::vec2 gBezier::getPoint2D(float t) const {
+    glm::vec3 p = getPoint(t);
+    return glm::vec2(p.x, p.y);
+}
 
-	return result;
+glm::vec3 gBezier::getTangent(float t) const {
+	if(points.size() != 3) return glm::vec3(0.0f);
+
+	if(t < 0.0f) t = 0.0f;
+	if(t > 1.0f) t = 1.0f;
+
+	float u = 1.0f - t;
+	return (2.0f * u * (points[1] - points[0])) + (2.0f * t * (points[2] - points[1]));
+}
+
+glm::vec2 gBezier::getTangent2D(float t) const {
+	glm::vec3 tangent = getTangent(t);
+	return glm::vec2(tangent.x, tangent.y);
+}
+
+float gBezier::getAngle(float t) const {
+	glm::vec3 tangent = getTangent(t);
+	return atan2(tangent.y, tangent.x);
 }
 
 void gBezier::draw() const {
-	float step = 1.0f / (float)resolution;
+	if (points.size() != 3) return;
 
-	if (is3D) {
-		glm::vec3 previousPoint = getPoint3D(0.0f);
-		for(float t = step; t <= 1.0f; t += step) {
-			glm::vec3 currentPoint = getPoint3D(t);
+	float step = 1.0f / (float)resolution;
+	glm::vec3 previousPoint = getPoint(0.0f);
+
+	for(float t = step; t <= 1.0f; t += step) {
+		glm::vec3 currentPoint = getPoint(t);
+
+		if (is3D) {
 			gDrawLine(previousPoint.x, previousPoint.y, previousPoint.z, currentPoint.x, currentPoint.y, currentPoint.z);
-			previousPoint = currentPoint;
-		}
-	} else {
-		glm::vec2 previousPoint = getPoint2D(0.0f);
-		for(float t = step; t <= 1.0f; t += step) {
-			glm::vec2 currentPoint = getPoint2D(t);
+		} else {
 			gDrawLine(previousPoint.x, previousPoint.y, currentPoint.x, currentPoint.y);
-			previousPoint = currentPoint;
 		}
+
+		previousPoint = currentPoint;
 	}
 }
 

@@ -31,6 +31,7 @@ public:
 	void enableAlphaBlending() override;
 	void disableAlphaBlending() override;
 	bool isAlphaBlendingEnabled() override;
+	void setBlendMode(int blendMode) override;
 	void enableAlphaTest() override;
 	void disableAlphaTest() override;
 	bool isAlphaTestEnabled() override;
@@ -140,6 +141,7 @@ public:
 
 	/* -------------- gGrid --------------- */
 	void drawVbo(const gVbo& vbo) override;
+	void drawVbo(const gVbo& vbo, const glm::mat4& model, const gMeshSurface& surface) override;
 
 	/* ---------------- gTexture ---------------- */
 	GLuint createTextures() override;

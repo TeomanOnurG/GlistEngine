@@ -20,7 +20,7 @@
 
 #include "gVKContext.h"
 
-#ifdef GVK_DESKTOP_GLFW
+#ifdef GVK_VULKAN
 
 #include <glm/glm.hpp>
 
@@ -65,14 +65,16 @@ struct alignas(16) gVKSceneUniforms {
 	alignas(16) glm::mat4 lightmatrix;
 	alignas(16) glm::vec4 viewpos;
 	alignas(16) glm::vec4 globalambientcolor;
-	// The renderer's current draw colour. color_frag.glsl ends with
-	// "result * renderColor", so a mesh on the OpenGL path is tinted by whatever
-	// setColor was last given - including a colour left over from drawing text.
-	// Matched here rather than left out, because OpenGL is the reference this port
-	// is measured against. One difference remains and is not worth a per-draw push
-	// constant: OpenGL refreshes it inside setColor, while this block is written
-	// once per frame, so a colour changed between two mesh draws lands on the next
-	// frame rather than immediately.
+	// The renderer's current draw colour, kept for layout only: both 3D shaders
+	// still declare this field, so the struct has to match, but neither reads it.
+	//
+	// It started here and had to move. color_frag.glsl ends with
+	// "result * renderColor", and OpenGL republishes the value inside setColor, so a
+	// canvas that recolours between two meshes gets a different colour on each. A
+	// uniform block cannot follow that: it is read when the commands execute, not
+	// when they are recorded, so every draw of the frame sees whichever value was
+	// written last. drawMesh3D folds the colour into the material push constant
+	// instead, which is per draw by construction.
 	alignas(16) glm::vec4 rendercolor;
 	// xyz is the shadow-casting light's position, which the depth bias is computed
 	// from; w is 0 or 1 for whether a shadow map is bound at all.
@@ -81,7 +83,19 @@ struct alignas(16) gVKSceneUniforms {
 	alignas(4) int enabledlights;
 	// 5x5 PCF instead of 3x3, mirroring ENABLE_SOFT_SHADOWS on the OpenGL side.
 	alignas(4) int softshadows;
-	alignas(4) int pad0;
+	// The same bitfield color_frag.glsl reads, with the same bit values - see
+	// gRenderer::ENABLE_FOG and friends. Soft shadows keep their own field above,
+	// which predates this and is what the shadow code already reads; the bit is set
+	// here too so the two never disagree about what the renderer was asked for.
+	// SSAO's bit is carried but nothing acts on it: it needs a depth and normal
+	// prepass, which this backend does not have.
+	alignas(4) int flags;
+	// xyz the fog colour, w the mode (0 linear, 1 exponential). Packed into the
+	// spare component rather than given an int of its own, which std140 would have
+	// to pad out to sixteen bytes anyway.
+	alignas(16) glm::vec4 fogcolor;
+	// x density, y gradient, z linear start, w linear end.
+	alignas(16) glm::vec4 fogparams;
 	gVKLightData lights[GVK_MAX_LIGHTS];
 };
 
@@ -123,6 +137,9 @@ struct gVKShadowPush {
 	glm::vec4 misc;
 };
 
+// A frame can change its lights while recording (muzzle flashes are a common
+// example). Each change needs immutable storage until that frame's fence signals;
+// otherwise rewriting one mapped UBO retroactively changes earlier draws.
 /*
  * Creates one uniform buffer and one descriptor set per frame in flight. Must run
  * after the pipelines, because the set layout and the descriptor pool it allocates
@@ -132,12 +149,19 @@ bool gvkCreateUniformResources(gVKContext& ctx);
 void gvkDestroyUniformResources(gVKContext& ctx);
 
 /*
+ * Adds one more chunk of scene uniform slots to a frame in flight. Not a file
+ * local helper because gVKContext has to befriend it: the storage it appends to
+ * is the context's own.
+ */
+bool gvkAppendSceneUniformChunk(gVKContext& ctx, int framei);
+
+/*
  * Copies data into the current frame's buffer. Cheap: the buffer is host visible,
  * host coherent and already mapped, so this is a memcpy with no flush and no
  * synchronisation of its own - the frame's fence is what keeps it safe.
  */
-void gvkWriteSceneUniforms(gVKContext& ctx, const gVKSceneUniforms& data);
+bool gvkWriteSceneUniforms(gVKContext& ctx, const gVKSceneUniforms& data);
 
-#endif /* GVK_DESKTOP_GLFW */
+#endif /* GVK_VULKAN */
 
 #endif /* CORE_GVKUNIFORM_H */

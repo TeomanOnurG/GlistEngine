@@ -8,41 +8,69 @@
 #ifndef GRAPHICS_GBEZIER_H_
 #define GRAPHICS_GBEZIER_H_
 
-#include "gRenderObject.h"
+#include "gMesh.h"
 #include <glm/glm.hpp>
+#include <vector>
 
 /**
  * @class gBezier
- * @brief Evaluates and renders 2D/3D Cubic Bezier curves using Bernstein polynomials.
+ * @brief Evaluates and renders a single quadratic Bezier curve requiring exactly 3 control points (two ends and a middle control point).
  *
- * @usage
- * gBezier curve(p0, p1, p2, p3);
- * curve.setResolution(100); // Optional: higher is smoother (default: 50)
- * curve.draw(); // Call inside the draw() loop
+ * Usage:
+ * gBezier curve;
+ * curve.addPoint(glm::vec3(0.0f, 0.0f, 0.0f));
+ * curve.addPoint(glm::vec3(5.0f, 10.0f, 0.0f));
+ * curve.addPoint(glm::vec3(10.0f, 0.0f, 0.0f));
+ * curve.draw();
  */
 
-class gBezier : public gRenderObject {
+class gBezier : public gMesh {
 public:
 	gBezier();
-	// Creates a 2D curve. Z axis will be 0.0f.
-	gBezier(glm::vec2 p0, glm::vec2 p1, glm::vec2 p2, glm::vec2 p3);
-	//Creates a 3D curve in world coordinates.
-	gBezier(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3);
 	virtual ~gBezier();
+	//Sets curve control points, capped at 3
+	void setPoint(const std::vector<glm::vec2>& pts);
+	void setPoint(const std::vector<glm::vec3>& pts);
 
-	void setPoint(glm::vec2 p0, glm::vec2 p1, glm::vec2 p2, glm::vec2 p3);
-	void setPoint(glm::vec3 p0, glm::vec3 p1, glm::vec3 p2, glm::vec3 p3);
+	// Adds a 2D control point to the end of the curve, up to 3. Z axis defaults to 0.0f.
+	void addPoint(glm::vec2 p);
 
-	//Returns the exact 2D coordinates at time t [0.0 - 1.0].
+	//Adds a 3D control point to the end of the curve, up to 3.
+	void addPoint(glm::vec3 p);
+
+	// Updates a specific control point coordinate by its index safely.
+	void setPointAtIndex(int index, glm::vec3 p);
+	void setPointAtIndex(int index, glm::vec2 p);
+
+	// Gets the current 3D coordinates of a specific control point by its index.
+	glm::vec3 getPointAtIndex(int index) const;
+
+	// Gets the current 2D coordinates (X, Y) of a specific control point.
+	glm::vec2 getPoint2DAtIndex(int index) const;
+
+	//Clears all points to reset or reuse the curve.
+	void clearPoints();
+
+	//Gets the interpolated point at time t [0.0 - 1.0]. Requires exactly 3 points; returns (0,0,0) otherwise.
+	glm::vec3 getPoint(float t) const;
+
 	glm::vec2 getPoint2D(float t) const;
-	//Returns the exact 3D coordinates at time t [0.0 - 1.0].
-	glm::vec3 getPoint3D(float t) const;
-	//Sets the number of line segments used for drawing.
+
+	//Gets the tangent (derivative) vector at time t [0.0 - 1.0]. Not normalized. Requires exactly 3 points; returns (0,0,0) otherwise.
+	glm::vec3 getTangent(float t) const;
+
+	glm::vec2 getTangent2D(float t) const;
+
+	//Gets the curve's slope angle at time t [0.0 - 1.0], in radians, measured in the XY plane (atan2 of the tangent's Y and X).
+	float getAngle(float t) const;
+
+	//Sets rendering resolution (number of segments).
 	void setResolution(int res);
-	//Draws the curve to the screen automatically in 2D or 3D.
+
+	//Draws the curve in 2D or 3D based on input points. No-op unless exactly 3 points are set.
 	void draw() const;
 private:
-	glm::vec3 p0, p1, p2, p3;
+	std::vector<glm::vec3> points;
 	int resolution;
 	bool is3D;
 };
