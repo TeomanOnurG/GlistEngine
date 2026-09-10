@@ -1,7 +1,7 @@
 cmake_minimum_required (VERSION 3.10.2)
 
 ########## PROJECT NAME ##########
-set(APP_NAME gisAlphaMasking)
+set(APP_NAME GlistApp)
 
 
 ########## USED PLUGINS LIST ##########
@@ -106,12 +106,12 @@ endif()
 set(GlistApp_SOURCES
 		${APP_DIR}/src/main.cpp
 		${APP_DIR}/src/gApp.cpp
-		${APP_DIR}/src/GameCanvas.cpp
+		${APP_DIR}/src/gCanvas.cpp
 )
 
 set(GlistApp_HEADERS
 		${APP_DIR}/src/gApp.h
-		${APP_DIR}/src/GameCanvas.h
+		${APP_DIR}/src/gCanvas.h
 )
 
 add_executable(${APP_NAME}

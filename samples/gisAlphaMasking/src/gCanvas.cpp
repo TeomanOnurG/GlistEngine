@@ -1,24 +1,24 @@
 /*
- * GameCanvas.cpp
+ * gCanvas.cpp
  *
  *  Created on: May 6, 2020
  *      Author: noyan
  */
 
 
-#include "GameCanvas.h"
+#include "gCanvas.h"
 
 
-GameCanvas::GameCanvas(gApp* root) : gBaseCanvas(root) {
+gCanvas::gCanvas(gApp* root) : gBaseCanvas(root) {
 	this->root = root;
 }
 
 
-GameCanvas::~GameCanvas() {
+gCanvas::~gCanvas() {
 }
 
 
-void GameCanvas::setup() {
+void gCanvas::setup() {
 	bothAngle = 0.0f;
 	pictureAngle = 0.0f;
 	maskAngle = 0.0f;
@@ -53,7 +53,7 @@ void GameCanvas::setup() {
 }
 
 
-void GameCanvas::update() {
+void gCanvas::update() {
 	bothAngle += 1.0f;
 	pictureAngle += 1.5f;
 	maskAngle += 1.5f;
@@ -68,7 +68,7 @@ void GameCanvas::update() {
 }
 
 
-void GameCanvas::draw() {
+void gCanvas::draw() {
 	int size = 180;
 	int gap = 55;
 	int textGap = 28;
@@ -206,53 +206,53 @@ void GameCanvas::draw() {
 }
 
 
-void GameCanvas::keyPressed(int key) {
+void gCanvas::keyPressed(int key) {
 }
 
 
-void GameCanvas::keyReleased(int key) {
+void gCanvas::keyReleased(int key) {
 }
 
 
-void GameCanvas::charPressed(unsigned int codepoint) {
+void gCanvas::charPressed(unsigned int codepoint) {
 }
 
 
-void GameCanvas::mouseMoved(int x, int y) {
+void gCanvas::mouseMoved(int x, int y) {
 }
 
 
-void GameCanvas::mouseDragged(int x, int y, int button) {
+void gCanvas::mouseDragged(int x, int y, int button) {
 }
 
 
-void GameCanvas::mousePressed(int x, int y, int button) {
+void gCanvas::mousePressed(int x, int y, int button) {
 }
 
 
-void GameCanvas::mouseReleased(int x, int y, int button) {
+void gCanvas::mouseReleased(int x, int y, int button) {
 }
 
 
-void GameCanvas::mouseScrolled(int x, int y) {
+void gCanvas::mouseScrolled(int x, int y) {
 }
 
 
-void GameCanvas::mouseEntered() {
+void gCanvas::mouseEntered() {
 }
 
 
-void GameCanvas::mouseExited() {
+void gCanvas::mouseExited() {
 }
 
 
-void GameCanvas::windowResized(int w, int h) {
+void gCanvas::windowResized(int w, int h) {
 }
 
 
-void GameCanvas::showNotify() {
+void gCanvas::showNotify() {
 }
 
 
-void GameCanvas::hideNotify() {
+void gCanvas::hideNotify() {
 }
